@@ -437,6 +437,7 @@ final class NativeElementBridge {
                 finalTree = tree
             }
             previousTree = finalTree
+            NativeTreeObserverRegistry.shared.publish(finalTree)
 
             // Track the most recent tree per native chrome URI so future
             // nav publishes back to the same URI can diff against it.

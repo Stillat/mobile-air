@@ -348,6 +348,7 @@ class NativeElementBridge private constructor() {
                             PerformanceTracker.onShadowThreadWork(tParseEnd - tParseStart, 0)
                         }
                         previousTree = diffedTree
+                        NativeTreeObserverRegistry.publish(diffedTree)
 
                         // Track per-URI for native chrome so future publishes
                         // back to the same URI can diff against it.

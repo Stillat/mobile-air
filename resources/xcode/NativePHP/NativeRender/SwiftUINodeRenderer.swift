@@ -162,6 +162,7 @@ struct NodeView: View, Equatable {
             // the tap and runs alongside it for press-in/press-out
             // tracking. No-op when no `press-*` prop is set.
             .modifier(NodePressFeedbackModifier(props: node.props))
+            .modifier(NativeNodeDecorationModifier(node: node))
     }
 
     // MARK: - Content Dispatch (via plugin registry)
