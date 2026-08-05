@@ -26,6 +26,14 @@ use Native\Mobile\Edge\Layouts\Builders\NavBarOptions;
 use Native\Mobile\Edge\Layouts\Builders\TabBar;
 use Native\Mobile\Edge\Layouts\Builders\TabBarOptions;
 use Native\Mobile\Edge\Layouts\NativeLayout;
+use Native\Mobile\Edge\Runtime\ComponentContext;
+use Native\Mobile\Edge\Runtime\ComponentPublished;
+use Native\Mobile\Edge\Runtime\Dispatch as RuntimeDispatch;
+use Native\Mobile\Edge\Runtime\DispatchFinished;
+use Native\Mobile\Edge\Runtime\DispatchKind;
+use Native\Mobile\Edge\Runtime\DispatchStarting;
+use Native\Mobile\Edge\Runtime\RenderTimings;
+use Native\Mobile\Edge\Runtime\RuntimeFailed;
 use Native\Mobile\Events\Concerns\BroadcastsGlobally;
 use Native\Mobile\JumpBridge;
 use Native\Mobile\Platform;
@@ -125,6 +133,8 @@ abstract class NativeComponent
 
     /** Publish counter for the forceFullFrame heartbeat. */
     private int $publishCount = 0;
+
+    private int $runtimeDispatchSequence = 0;
 
     private ?\Throwable $lastNotifiedRuntimeFailure = null;
 
@@ -1426,30 +1436,21 @@ abstract class NativeComponent
         return $props;
     }
 
-    private function notifyComponentPublished(?array $timings = null): void
+    private function runtimeComponentContext(): ComponentContext
     {
-        RuntimeObservers::componentPublished([
-            'id' => spl_object_hash($this),
-            'name' => class_basename(static::class),
-            'class' => static::class,
-            'uri' => $this->nativeRouter?->currentUri() ?? '',
-            'renderCount' => $this->publishCount,
-            'state' => $this->getPublicProperties(),
-            'timings' => $timings,
-        ]);
+        return new ComponentContext(
+            component: $this,
+            uri: $this->nativeRouter?->currentUri() ?? '',
+            renderCount: $this->publishCount,
+        );
     }
 
-    private function runtimeDispatchContext(string $kind, array $values): array
+    private function notifyComponentPublished(?RenderTimings $timings = null): void
     {
-        return [
-            'kind' => $kind,
-            'id' => spl_object_hash($this),
-            'name' => class_basename(static::class),
-            'class' => static::class,
-            'uri' => $this->nativeRouter?->currentUri() ?? '',
-            'renderCount' => $this->publishCount,
-            ...$values,
-        ];
+        RuntimeObservers::componentPublished(new ComponentPublished(
+            context: $this->runtimeComponentContext(),
+            timings: $timings,
+        ));
     }
 
     // ── Computed properties (#[Computed]) ────────────
@@ -1774,16 +1775,17 @@ abstract class NativeComponent
                 ?? $this->nativeEventListeners['native:'.$eventName]
                 ?? null);
         $startedAt = hrtime(true);
-        $before = $this->getPublicProperties();
         $error = null;
-        $context = $this->runtimeDispatchContext('native', [
-            'event' => $eventName,
-            'method' => $method,
-            'payload' => is_array($payload) ? $payload : ['value' => $payload],
-            'before' => $before,
-        ]);
+        $dispatch = new RuntimeDispatch(
+            id: ++$this->runtimeDispatchSequence,
+            context: $this->runtimeComponentContext(),
+            kind: DispatchKind::Native,
+            method: $method,
+            event: $eventName,
+            payload: is_array($payload) ? $payload : ['value' => $payload],
+        );
 
-        RuntimeObservers::dispatchStarting($context);
+        RuntimeObservers::dispatchStarting(new DispatchStarting($dispatch));
 
         try {
             $this->dispatchNativeEventNow($eventName, $payload);
@@ -1792,11 +1794,11 @@ abstract class NativeComponent
 
             throw $exception;
         } finally {
-            RuntimeObservers::dispatchFinished($context + [
-                'after' => $this->getPublicProperties(),
-                'durationMs' => round((hrtime(true) - $startedAt) / 1_000_000, 3),
-                'error' => $error,
-            ]);
+            RuntimeObservers::dispatchFinished(new DispatchFinished(
+                dispatch: $dispatch,
+                durationMs: round((hrtime(true) - $startedAt) / 1_000_000, 3),
+                exception: $error,
+            ));
         }
     }
 
@@ -2350,11 +2352,11 @@ abstract class NativeComponent
                         $this->nativeRouter?->flushDeferredTransition();
                         $t3 = microtime(true);
                         if (RuntimeObservers::any()) {
-                            $this->notifyComponentPublished([
-                                'renderMs' => round(($t3 - $t0) * 1000, 3),
-                                'serializeMs' => 0.0,
-                                'publishMs' => 0.0,
-                            ]);
+                            $this->notifyComponentPublished(new RenderTimings(
+                                renderMs: round(($t3 - $t0) * 1000, 3),
+                                serializeMs: 0.0,
+                                publishMs: 0.0,
+                            ));
                         }
                         NativeRouter::debugLog(sprintf(
                             'PERF [%s] streaming total=%.1fms',
@@ -2376,11 +2378,11 @@ abstract class NativeComponent
 
                         $t3 = microtime(true);
                         if (RuntimeObservers::any()) {
-                            $this->notifyComponentPublished([
-                                'renderMs' => round(($t1 - $t0) * 1000, 3),
-                                'serializeMs' => round(($t2 - $t1) * 1000, 3),
-                                'publishMs' => round(($t3 - $t2) * 1000, 3),
-                            ]);
+                            $this->notifyComponentPublished(new RenderTimings(
+                                renderMs: round(($t1 - $t0) * 1000, 3),
+                                serializeMs: round(($t2 - $t1) * 1000, 3),
+                                publishMs: round(($t3 - $t2) * 1000, 3),
+                            ));
                         }
                         NativeRouter::debugLog(sprintf(
                             'PERF [%s] render=%.1fms toArray=%.1fms publish=%.1fms total=%.1fms',
@@ -2769,9 +2771,10 @@ abstract class NativeComponent
 
         if (RuntimeObservers::any() && $this->lastNotifiedRuntimeFailure !== $e) {
             $this->lastNotifiedRuntimeFailure = $e;
-            RuntimeObservers::failed($e, $this->runtimeDispatchContext('failure', [
-                'state' => $this->getPublicProperties(),
-            ]));
+            RuntimeObservers::failed(new RuntimeFailed(
+                context: $this->runtimeComponentContext(),
+                exception: $e,
+            ));
         }
 
         try {
@@ -3563,18 +3566,19 @@ abstract class NativeComponent
         array $arguments,
     ): mixed {
         $startedAt = hrtime(true);
-        $before = $this->getPublicProperties();
         $error = null;
-        $context = $this->runtimeDispatchContext('interaction', [
-            'type' => $type,
-            'callbackId' => $callbackId,
-            'nodeId' => isset($event['node_id']) ? (int) $event['node_id'] : null,
-            'method' => $method,
-            'args' => $arguments,
-            'before' => $before,
-        ]);
+        $dispatch = new RuntimeDispatch(
+            id: ++$this->runtimeDispatchSequence,
+            context: $this->runtimeComponentContext(),
+            kind: DispatchKind::Interaction,
+            method: $method,
+            arguments: $arguments,
+            eventType: $type,
+            callbackId: $callbackId,
+            nodeId: isset($event['node_id']) ? (int) $event['node_id'] : null,
+        );
 
-        RuntimeObservers::dispatchStarting($context);
+        RuntimeObservers::dispatchStarting(new DispatchStarting($dispatch));
 
         try {
             return $this->$method(...$arguments);
@@ -3583,11 +3587,11 @@ abstract class NativeComponent
 
             throw $exception;
         } finally {
-            RuntimeObservers::dispatchFinished($context + [
-                'after' => $this->getPublicProperties(),
-                'durationMs' => round((hrtime(true) - $startedAt) / 1_000_000, 3),
-                'error' => $error,
-            ]);
+            RuntimeObservers::dispatchFinished(new DispatchFinished(
+                dispatch: $dispatch,
+                durationMs: round((hrtime(true) - $startedAt) / 1_000_000, 3),
+                exception: $error,
+            ));
         }
     }
 }

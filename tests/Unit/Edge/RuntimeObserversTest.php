@@ -5,6 +5,15 @@ use Native\Mobile\Edge\Contracts\RuntimeObserver;
 use Native\Mobile\Edge\Elements\Column;
 use Native\Mobile\Edge\NativeComponent;
 use Native\Mobile\Edge\NativeEventHandlers;
+use Native\Mobile\Edge\NativeEventHandling;
+use Native\Mobile\Edge\Runtime\ComponentContext;
+use Native\Mobile\Edge\Runtime\ComponentPublished;
+use Native\Mobile\Edge\Runtime\Dispatch as RuntimeDispatch;
+use Native\Mobile\Edge\Runtime\DispatchFinished;
+use Native\Mobile\Edge\Runtime\DispatchKind;
+use Native\Mobile\Edge\Runtime\DispatchStarting;
+use Native\Mobile\Edge\Runtime\RenderTimings;
+use Native\Mobile\Edge\Runtime\RuntimeFailed;
 use Native\Mobile\Edge\RuntimeObservers;
 
 class RuntimeObservedComponent extends NativeComponent
@@ -60,24 +69,30 @@ function runtimeObserverSpy(): RuntimeObserver
 
         public array $failures = [];
 
-        public function componentPublished(array $snapshot): void
+        public array $startingStates = [];
+
+        public array $finishedStates = [];
+
+        public function componentPublished(ComponentPublished $event): void
         {
-            $this->published[] = $snapshot;
+            $this->published[] = $event;
         }
 
-        public function dispatchStarting(array $dispatch): void
+        public function dispatchStarting(DispatchStarting $event): void
         {
-            $this->starting[] = $dispatch;
+            $this->starting[] = $event;
+            $this->startingStates[] = $event->dispatch->context->component->count ?? null;
         }
 
-        public function dispatchFinished(array $dispatch): void
+        public function dispatchFinished(DispatchFinished $event): void
         {
-            $this->finished[] = $dispatch;
+            $this->finished[] = $event;
+            $this->finishedStates[] = $event->dispatch->context->component->count ?? null;
         }
 
-        public function failed(Throwable $exception, array $context): void
+        public function failed(RuntimeFailed $event): void
         {
-            $this->failures[] = [$exception, $context];
+            $this->failures[] = $event;
         }
     };
 }
@@ -85,17 +100,33 @@ function runtimeObserverSpy(): RuntimeObserver
 it('fans runtime notifications out and supports explicit unregistration', function () {
     $observer = runtimeObserverSpy();
     $id = RuntimeObservers::register($observer);
+    $component = new RuntimeObservedComponent;
+    $context = new ComponentContext($component, '/counter', 2);
+    $dispatch = new RuntimeDispatch(
+        id: 1,
+        context: $context,
+        kind: DispatchKind::Interaction,
+        method: 'increment',
+        eventType: 1,
+    );
+    $exception = new RuntimeException('broken');
 
-    RuntimeObservers::componentPublished(['class' => 'Example']);
-    RuntimeObservers::dispatchStarting(['kind' => 'interaction']);
-    RuntimeObservers::dispatchFinished(['durationMs' => 1.5]);
-    RuntimeObservers::failed(new RuntimeException('broken'), ['kind' => 'failure']);
+    RuntimeObservers::componentPublished(new ComponentPublished(
+        $context,
+        new RenderTimings(1.0, 0.5, 0.25),
+    ));
+    RuntimeObservers::dispatchStarting(new DispatchStarting($dispatch));
+    RuntimeObservers::dispatchFinished(new DispatchFinished($dispatch, 1.5));
+    RuntimeObservers::failed(new RuntimeFailed($context, $exception));
 
     expect(RuntimeObservers::any())->toBeTrue()
         ->and($observer->published)->toHaveCount(1)
+        ->and($observer->published[0]->context)->toBe($context)
+        ->and($observer->published[0]->timings?->serializeMs)->toBe(0.5)
         ->and($observer->starting)->toHaveCount(1)
-        ->and($observer->finished[0]['durationMs'])->toBe(1.5)
-        ->and($observer->failures[0][0]->getMessage())->toBe('broken');
+        ->and($observer->starting[0]->dispatch)->toBe($dispatch)
+        ->and($observer->finished[0]->durationMs)->toBe(1.5)
+        ->and($observer->failures[0]->exception)->toBe($exception);
 
     RuntimeObservers::unregister($id);
 
@@ -105,36 +136,44 @@ it('fans runtime notifications out and supports explicit unregistration', functi
 it('isolates application behavior from observer failures', function () {
     RuntimeObservers::register(new class implements RuntimeObserver
     {
-        public function componentPublished(array $snapshot): void
+        public function componentPublished(ComponentPublished $event): void
         {
             throw new RuntimeException('observer');
         }
 
-        public function dispatchStarting(array $dispatch): void
+        public function dispatchStarting(DispatchStarting $event): void
         {
             throw new RuntimeException('observer');
         }
 
-        public function dispatchFinished(array $dispatch): void
+        public function dispatchFinished(DispatchFinished $event): void
         {
             throw new RuntimeException('observer');
         }
 
-        public function failed(Throwable $exception, array $context): void
+        public function failed(RuntimeFailed $event): void
         {
             throw new RuntimeException('observer');
         }
     });
+    $observer = runtimeObserverSpy();
+    RuntimeObservers::register($observer);
+    $component = new RuntimeObservedComponent;
+    $context = new ComponentContext($component, '/counter', 1);
+    $dispatch = new RuntimeDispatch(1, $context, DispatchKind::Interaction);
 
-    RuntimeObservers::componentPublished([]);
-    RuntimeObservers::dispatchStarting([]);
-    RuntimeObservers::dispatchFinished([]);
-    RuntimeObservers::failed(new RuntimeException('application'), []);
+    RuntimeObservers::componentPublished(new ComponentPublished($context));
+    RuntimeObservers::dispatchStarting(new DispatchStarting($dispatch));
+    RuntimeObservers::dispatchFinished(new DispatchFinished($dispatch, 1.0));
+    RuntimeObservers::failed(new RuntimeFailed($context, new RuntimeException('application')));
 
-    expect(true)->toBeTrue();
+    expect($observer->published)->toHaveCount(1)
+        ->and($observer->starting)->toHaveCount(1)
+        ->and($observer->finished)->toHaveCount(1)
+        ->and($observer->failures)->toHaveCount(1);
 });
 
-it('dispatches claimed namespaced native events to package handlers', function () {
+it('only claims namespaced native events when a handler explicitly handles them', function () {
     $component = new class extends NativeComponent
     {
         public int $value = 0;
@@ -145,17 +184,34 @@ it('dispatches claimed namespaced native events to package handlers', function (
         }
     };
 
-    $id = NativeEventHandlers::register('tool:set', function (array $payload, NativeComponent $target): void {
+    $passId = NativeEventHandlers::register('tool:set', function (): NativeEventHandling {
+        return NativeEventHandling::Pass;
+    });
+    $handledId = NativeEventHandlers::register('tool:set', function (array $payload, NativeComponent $target): NativeEventHandling {
         $target->value = (int) ($payload['value'] ?? 0);
+
+        return NativeEventHandling::Handled;
     });
 
     expect(NativeEventHandlers::dispatch('tool:set', ['value' => 42], $component))->toBeTrue()
         ->and($component->value)->toBe(42)
         ->and(NativeEventHandlers::dispatch('tool:missing', [], $component))->toBeFalse();
 
-    NativeEventHandlers::unregister($id);
+    NativeEventHandlers::unregister($handledId);
 
     expect(NativeEventHandlers::dispatch('tool:set', ['value' => 9], $component))->toBeFalse();
+
+    NativeEventHandlers::unregister($passId);
+});
+
+it('does not claim a native event when its package handler fails', function () {
+    $component = new RuntimeObservedComponent;
+
+    NativeEventHandlers::register('tool:set', function (): never {
+        throw new RuntimeException('handler failed');
+    });
+
+    expect(NativeEventHandlers::dispatch('tool:set', [], $component))->toBeFalse();
 });
 
 it('requires package event names to be namespaced', function () {
@@ -172,12 +228,12 @@ it('observes interaction dispatch around the actual component mutation', functio
 
     expect($component->count)->toBe(1)
         ->and($observer->starting)->toHaveCount(1)
-        ->and($observer->starting[0]['kind'])->toBe('interaction')
-        ->and($observer->starting[0]['before']['count'])->toBe(0)
+        ->and($observer->starting[0]->dispatch->kind)->toBe(DispatchKind::Interaction)
+        ->and($observer->startingStates[0])->toBe(0)
         ->and($observer->finished)->toHaveCount(1)
-        ->and($observer->finished[0]['after']['count'])->toBe(1)
-        ->and($observer->finished[0]['nodeId'])->toBe(7)
-        ->and($observer->finished[0]['durationMs'])->toBeFloat();
+        ->and($observer->finishedStates[0])->toBe(1)
+        ->and($observer->finished[0]->dispatch->nodeId)->toBe(7)
+        ->and($observer->finished[0]->durationMs)->toBeFloat();
 });
 
 it('routes package native events through the component and observes them', function () {
@@ -185,13 +241,16 @@ it('routes package native events through the component and observes them', funct
     RuntimeObservers::register($observer);
     $component = new RuntimeObservedComponent;
     $component->initializeCallbacks();
-    NativeEventHandlers::register('tool:set', function (array $payload, NativeComponent $target): void {
+    NativeEventHandlers::register('tool:set', function (array $payload, NativeComponent $target): NativeEventHandling {
         $target->count = (int) $payload['value'];
+
+        return NativeEventHandling::Handled;
     });
 
     $component->dispatchPluginEvent('tool:set', ['value' => 13]);
 
     expect($component->count)->toBe(13)
-        ->and($observer->starting[0]['kind'])->toBe('native')
-        ->and($observer->finished[0]['after']['count'])->toBe(13);
+        ->and($observer->starting[0]->dispatch->kind)->toBe(DispatchKind::Native)
+        ->and($observer->startingStates[0])->toBe(0)
+        ->and($observer->finishedStates[0])->toBe(13);
 });

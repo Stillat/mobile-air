@@ -9,12 +9,12 @@ use Throwable;
  * Package-extensible native-event handlers.
  *
  * Handlers are keyed by an ordinary namespaced event name and run before the
- * component's #[OnNative] listeners. Registering a handler claims that event;
- * core ships none, so the default dispatch path remains unchanged.
+ * component's #[OnNative] listeners. A handler must explicitly return Handled
+ * to claim the event; core ships none, so the default path remains unchanged.
  */
 class NativeEventHandlers
 {
-    /** @var array<string, array<int, callable(array<string, mixed>, NativeComponent): void>> */
+    /** @var array<string, array<int, callable(array<string, mixed>, NativeComponent): NativeEventHandling>> */
     protected static array $handlers = [];
 
     /** @var array<int, string> */
@@ -61,13 +61,15 @@ class NativeEventHandlers
 
         foreach ($handlers as $handler) {
             try {
-                $handler($values, $component);
+                if ($handler($values, $component) === NativeEventHandling::Handled) {
+                    return true;
+                }
             } catch (Throwable $exception) {
                 NativeRouter::debugLog('plugin native event handler failed: '.$exception->getMessage());
             }
         }
 
-        return true;
+        return false;
     }
 
     public static function reset(): void

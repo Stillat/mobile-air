@@ -3,6 +3,10 @@
 namespace Native\Mobile\Edge;
 
 use Native\Mobile\Edge\Contracts\RuntimeObserver;
+use Native\Mobile\Edge\Runtime\ComponentPublished;
+use Native\Mobile\Edge\Runtime\DispatchFinished;
+use Native\Mobile\Edge\Runtime\DispatchStarting;
+use Native\Mobile\Edge\Runtime\RuntimeFailed;
 use Throwable;
 
 /**
@@ -42,24 +46,24 @@ class RuntimeObservers
         static::$sequence = 0;
     }
 
-    public static function componentPublished(array $snapshot): void
+    public static function componentPublished(ComponentPublished $event): void
     {
-        static::notify(fn (RuntimeObserver $observer) => $observer->componentPublished($snapshot));
+        static::notify(fn (RuntimeObserver $observer) => $observer->componentPublished($event));
     }
 
-    public static function dispatchStarting(array $dispatch): void
+    public static function dispatchStarting(DispatchStarting $event): void
     {
-        static::notify(fn (RuntimeObserver $observer) => $observer->dispatchStarting($dispatch));
+        static::notify(fn (RuntimeObserver $observer) => $observer->dispatchStarting($event));
     }
 
-    public static function dispatchFinished(array $dispatch): void
+    public static function dispatchFinished(DispatchFinished $event): void
     {
-        static::notify(fn (RuntimeObserver $observer) => $observer->dispatchFinished($dispatch));
+        static::notify(fn (RuntimeObserver $observer) => $observer->dispatchFinished($event));
     }
 
-    public static function failed(Throwable $exception, array $context): void
+    public static function failed(RuntimeFailed $event): void
     {
-        static::notify(fn (RuntimeObserver $observer) => $observer->failed($exception, $context));
+        static::notify(fn (RuntimeObserver $observer) => $observer->failed($event));
     }
 
     protected static function notify(callable $notification): void
