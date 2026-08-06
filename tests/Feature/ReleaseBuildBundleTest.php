@@ -99,9 +99,6 @@ class ReleaseBuildBundleTest extends TestCase
         $this->assertNotFalse($zip->statName('vendor/acme/pkg/src/Pkg.php'));
         $this->assertFalse($zip->statName('vendor/acme/pkg/README.md'));
         $this->assertFalse($zip->statName('secret/api-key.txt'));
-        $this->assertNotFalse($zip->statName('vendor/nativephp/mobile/resources/views/native.blade.php'));
-        $this->assertNotFalse($zip->statName('vendor/nativephp/mobile/resources/jump/views/qr.blade.php'));
-        $this->assertFalse($zip->statName('vendor/nativephp/mobile/resources/androidstudio/template.kt'));
         // Cleanup-only files survive the copy so composer install can use
         // them, then the cleanup pass removes them from the final bundle.
         // The Android artisan.php bootstrap must survive that pass.
@@ -159,9 +156,6 @@ class ReleaseBuildBundleTest extends TestCase
         File::ensureDirectoryExists($this->testProjectPath.'/app');
         File::ensureDirectoryExists($this->testProjectPath.'/bootstrap/cache');
         File::ensureDirectoryExists($this->testProjectPath.'/vendor/nativephp/mobile/bootstrap/android');
-        File::ensureDirectoryExists($this->testProjectPath.'/vendor/nativephp/mobile/resources/views');
-        File::ensureDirectoryExists($this->testProjectPath.'/vendor/nativephp/mobile/resources/jump/views');
-        File::ensureDirectoryExists($this->testProjectPath.'/vendor/nativephp/mobile/resources/androidstudio');
         File::ensureDirectoryExists($this->testProjectPath.'/nativephp/android/app/src/main/assets');
 
         File::put($this->testProjectPath.'/composer.json', json_encode([
@@ -191,9 +185,6 @@ class ReleaseBuildBundleTest extends TestCase
         File::put($this->testProjectPath.'/bootstrap/cache/packages.php', '<?php return [];');
         File::put($this->testProjectPath.'/bootstrap/cache/services.php', '<?php return [];');
         File::put($this->testProjectPath.'/vendor/nativephp/mobile/bootstrap/android/artisan.php', '<?php // artisan');
-        File::put($this->testProjectPath.'/vendor/nativephp/mobile/resources/views/native.blade.php', 'runtime view');
-        File::put($this->testProjectPath.'/vendor/nativephp/mobile/resources/jump/views/qr.blade.php', 'jump view');
-        File::put($this->testProjectPath.'/vendor/nativephp/mobile/resources/androidstudio/template.kt', 'build template');
     }
 }
 

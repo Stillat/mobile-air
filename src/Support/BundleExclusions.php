@@ -4,16 +4,6 @@ namespace Native\Mobile\Support;
 
 class BundleExclusions
 {
-    /** NativePHP Mobile resources used only while creating native projects. */
-    public const MOBILE_BUILD_RESOURCES = [
-        'vendor/nativephp/mobile/resources/androidstudio',
-        'vendor/nativephp/mobile/resources/boost',
-        'vendor/nativephp/mobile/resources/dist',
-        'vendor/nativephp/mobile/resources/js',
-        'vendor/nativephp/mobile/resources/stubs',
-        'vendor/nativephp/mobile/resources/xcode',
-    ];
-
     /** Excluded at any depth, including inside vendor packages. */
     public const ANY_DEPTH = [
         '.git',
@@ -88,7 +78,7 @@ class BundleExclusions
 
     /** Specific vendor paths to exclude. */
     public const VENDOR_PATHS = [
-        ...self::MOBILE_BUILD_RESOURCES,
+        'vendor/nativephp/mobile/resources',
         'vendor/*/*/vendor',
         'vendor/endroid',
         'vendor/laravel/pint/builds',

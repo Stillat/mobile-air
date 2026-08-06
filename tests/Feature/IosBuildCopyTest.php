@@ -45,12 +45,7 @@ class IosBuildCopyTest extends TestCase
             $this->assertContains($pattern, $paths);
         }
 
-        foreach (BundleExclusions::MOBILE_BUILD_RESOURCES as $path) {
-            $this->assertContains($path, $paths);
-        }
-
-        $this->assertNotContains('vendor/nativephp/mobile/resources', $paths);
-        $this->assertNotContains('vendor/nativephp/mobile/resources/views', $paths);
+        $this->assertContains('vendor/nativephp/mobile/resources', $paths);
         $this->assertContains('vendor/*/*/vendor', $paths);
     }
 
