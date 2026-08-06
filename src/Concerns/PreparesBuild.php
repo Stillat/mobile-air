@@ -404,7 +404,6 @@ trait PreparesBuild
                 '-x!storage\\app\\native-build',
                 '-x!storage\\logs\\laravel.log',
                 '-x!vendor\\endroid',
-                '-x!vendor\\nativephp\\mobile\\resources',
                 '-x!vendor\\nativephp\\mobile\\vendor',
                 // Keep the runtime dirs themselves but drop their cached contents
                 '-x!bootstrap\\cache\\*',
@@ -412,6 +411,10 @@ trait PreparesBuild
                 '-x!storage\\framework\\sessions\\*',
                 '-x!storage\\framework\\views\\*',
             ];
+
+            foreach (BundleExclusions::MOBILE_BUILD_RESOURCES as $path) {
+                $patterns[] = '-x!'.str_replace('/', '\\', $path);
+            }
 
             // Honor the configured exclusions for parity with the unix branch
             // (entries containing * pass through as 7-Zip wildcards)
@@ -493,7 +496,7 @@ trait PreparesBuild
 
             // Always exclude these directories
             if ($shouldExclude ||
-                Str::startsWith($relativePath, 'vendor/nativephp/mobile/resources') ||
+                Str::startsWith($relativePath, BundleExclusions::MOBILE_BUILD_RESOURCES) ||
                 Str::startsWith($relativePath, 'vendor/nativephp/mobile/vendor') ||
                 Str::startsWith($relativePath, 'vendor/endroid') ||
                 Str::startsWith($relativePath, '.idea') ||

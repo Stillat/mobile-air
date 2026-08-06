@@ -16,6 +16,7 @@ use Native\Mobile\Plugins\Compilers\IOSPluginCompiler;
 use Native\Mobile\Plugins\PluginHookRunner;
 use Native\Mobile\Plugins\PluginRegistry;
 use Native\Mobile\Plugins\PluginSecretsValidator;
+use Native\Mobile\Support\BundleExclusions;
 use Native\Mobile\Support\BundleFileManager;
 
 use function Laravel\Prompts\error;
@@ -873,8 +874,13 @@ class BuildIosAppCommand extends Command
         // reads. The `vendor/*/vendor/...` glob also drops nested duplicates
         // that slip in when a plugin ships its own vendor/ dir. In `zip`'s
         // matcher `*` spans `/`, so each prefix excludes the whole subtree.
+        $nativeBuildResourceExcludes = implode('', array_map(
+            static fn (string $path): string => " '{$path}/*'",
+            BundleExclusions::MOBILE_BUILD_RESOURCES
+        ));
+
         $excludes = "-x '*.DS_Store' '*/.*'"
-            ." 'vendor/nativephp/mobile/resources/*'"
+            .$nativeBuildResourceExcludes
             ." 'vendor/*/vendor/nativephp/mobile/resources/*'"
             ." 'vendor/nativephp/mobile/vendor/*'"
             ." 'vendor/endroid/*'";
