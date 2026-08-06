@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 use Native\Mobile\Concerns\PreparesBuild;
@@ -98,7 +99,6 @@ class ReleaseBuildBundleTest extends TestCase
         $this->assertNotFalse($zip->statName('vendor/acme/pkg/src/Pkg.php'));
         $this->assertFalse($zip->statName('vendor/acme/pkg/README.md'));
         $this->assertFalse($zip->statName('secret/api-key.txt'));
-
         // Cleanup-only files survive the copy so composer install can use
         // them, then the cleanup pass removes them from the final bundle.
         // The Android artisan.php bootstrap must survive that pass.
@@ -126,14 +126,14 @@ class ReleaseBuildBundleTest extends TestCase
         $missingAtInstallTime = [];
 
         Process::fake([
-            'composer install*' => function () use (&$missingAtInstallTime) {
+            'composer install*' => function (PendingProcess $process) use (&$missingAtInstallTime) {
                 foreach ([
                     'bootstrap/cache',
                     'storage/framework/cache',
                     'storage/framework/sessions',
                     'storage/framework/views',
                 ] as $dir) {
-                    if (! is_dir($this->testProjectPath.'/nativephp/android/laravel/'.$dir)) {
+                    if (! is_dir($process->path.'/'.$dir)) {
                         $missingAtInstallTime[] = $dir;
                     }
                 }

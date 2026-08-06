@@ -9,7 +9,7 @@ use Tests\TestCase;
 class ConfigurationUpdatesTest extends TestCase
 {
     use PreparesBuild {
-        updateAndroidConfiguration as public testUpdateAndroidConfiguration;
+        updateAndroidConfiguration as protected testUpdateAndroidConfiguration;
     }
 
     protected string $testProjectPath;

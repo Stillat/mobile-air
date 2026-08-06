@@ -306,14 +306,13 @@ class EdgeCasesAndErrorHandlingTest extends TestCase
 
         config(['nativephp.android.android_sdk_path' => $networkPath]);
 
-        // Should handle without crashing
+        File::makeDirectory($this->testProjectPath.'/nativephp/android', 0755, true);
+
         $this->updateLocalProperties();
 
         $localPropertiesPath = $this->testProjectPath.'/nativephp/android/local.properties';
-        if (File::exists($localPropertiesPath)) {
-            $contents = File::get($localPropertiesPath);
-            $this->assertStringContainsString('sdk.dir=', $contents);
-        }
+        $this->assertFileExists($localPropertiesPath);
+        $this->assertStringContainsString('sdk.dir=', File::get($localPropertiesPath));
     }
 
     protected function logToFile(string $message): void {}

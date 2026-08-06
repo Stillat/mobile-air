@@ -399,6 +399,8 @@ class PluginRegistryTest extends TestCase
      */
     public function it_refreshes_cache(): void
     {
+        $plugin = $this->createMockPlugin('vendor/refreshed-plugin');
+
         $this->mockDiscovery
             ->shouldReceive('clearCache')
             ->once();
@@ -406,12 +408,11 @@ class PluginRegistryTest extends TestCase
         $this->mockDiscovery
             ->shouldReceive('discover')
             ->once()
-            ->andReturn(collect([]));
+            ->andReturn(collect([$plugin]));
 
         $this->registry->refresh();
 
-        // Verify discover was called after clearing cache
-        $this->registry->all();
+        $this->assertSame([$plugin], $this->registry->all()->all());
     }
 
     /**

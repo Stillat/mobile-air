@@ -102,6 +102,10 @@ class ManagesIosSigningTest extends TestCase
 
     public function test_handles_unreadable_files_gracefully()
     {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('Windows does not enforce Unix chmod permissions.');
+        }
+
         // Create a temporary file and make it unreadable
         $tempFile = tempnam(sys_get_temp_dir(), 'test_unreadable');
         file_put_contents($tempFile, 'content');

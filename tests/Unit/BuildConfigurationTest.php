@@ -9,7 +9,7 @@ use Tests\TestCase;
 class BuildConfigurationTest extends TestCase
 {
     use PreparesBuild {
-        updateBuildConfiguration as public testUpdateBuildConfiguration;
+        updateBuildConfiguration as protected testUpdateBuildConfiguration;
     }
 
     protected string $testProjectPath;

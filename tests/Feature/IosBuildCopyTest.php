@@ -137,6 +137,8 @@ class IosBuildCopyTest extends TestCase
 
     public function test_copy_runs_rsync_with_correct_flags_and_excludes(): void
     {
+        $this->requireRsyncPlatform();
+
         $appPath = $this->fakeRsyncAndGetAppPath();
 
         BundleFileManager::copy(base_path(), $appPath);
@@ -174,6 +176,8 @@ class IosBuildCopyTest extends TestCase
 
     public function test_copy_throws_on_rsync_failure(): void
     {
+        $this->requireRsyncPlatform();
+
         $appPath = $this->fakeRsyncAndGetAppPath(exitCode: 1);
 
         $this->expectException(\Exception::class);
@@ -184,6 +188,8 @@ class IosBuildCopyTest extends TestCase
 
     public function test_copy_includes_vendor_export_ignore_patterns_in_rsync(): void
     {
+        $this->requireRsyncPlatform();
+
         $this->createVendorGitattributes('acme/plugin', "/tests export-ignore\n/docs export-ignore\n");
         $appPath = $this->fakeRsyncAndGetAppPath();
 
@@ -199,6 +205,8 @@ class IosBuildCopyTest extends TestCase
 
     public function test_copy_passes_vendor_non_runtime_excludes_to_rsync(): void
     {
+        $this->requireRsyncPlatform();
+
         $appPath = $this->fakeRsyncAndGetAppPath();
 
         BundleFileManager::copy(base_path(), $appPath);
@@ -218,6 +226,8 @@ class IosBuildCopyTest extends TestCase
 
     public function test_copy_passes_project_anchored_excludes_to_rsync(): void
     {
+        $this->requireRsyncPlatform();
+
         $appPath = $this->fakeRsyncAndGetAppPath();
 
         BundleFileManager::copy(base_path(), $appPath);
@@ -463,6 +473,8 @@ class IosBuildCopyTest extends TestCase
 
     public function test_copy_passes_config_excludes_to_rsync(): void
     {
+        $this->requireRsyncPlatform();
+
         $appPath = $this->fakeRsyncAndGetAppPath();
 
         BundleFileManager::copy(base_path(), $appPath, [
@@ -534,6 +546,13 @@ class IosBuildCopyTest extends TestCase
         $path = $this->testProjectPath.'/vendor/'.$package;
         File::makeDirectory($path, 0755, true);
         File::put($path.'/.gitattributes', $content);
+    }
+
+    protected function requireRsyncPlatform(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('Rsync command assertions require a Unix-like OS.');
+        }
     }
 
     protected function fakeRsyncAndGetAppPath(int $exitCode = 0): string

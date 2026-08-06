@@ -481,7 +481,8 @@ class PluginCommandsTest extends TestCase
         $this->artisan('native:plugin:validate', [
             'path' => $this->testPluginPath,
         ])
-            ->expectsOutputToContain('native code');  // Should warn about missing files
+            ->expectsOutputToContain('native code')
+            ->assertFailed();
     }
 
     /**
