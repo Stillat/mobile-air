@@ -438,6 +438,7 @@ class NativeElementCollector
                 + static::buildGradientProps($attrs)
                 + static::buildCornerRadiusProps($attrs)
                 + static::buildAnimationProps($attrs)
+                + static::buildVariantProps($attrs, fn () => static::makeElement($type))
                 + $capturedProps;
             $onPress = static::resolveOnPress($attrs);
             $onLongPress = static::resolveOnLongPress($attrs);
@@ -490,7 +491,8 @@ class NativeElementCollector
             $props = array_merge($capturedProps, $props ?? []);
             $darkProps = static::buildDarkProps($attrs)
                 + static::buildGradientProps($attrs)
-                + static::buildCornerRadiusProps($attrs);
+                + static::buildCornerRadiusProps($attrs)
+                + static::buildVariantProps($attrs, fn () => static::makeElement($type));
             if (! empty($darkProps)) {
                 $props = array_merge($props ?? [], $darkProps);
             }
@@ -543,6 +545,7 @@ class NativeElementCollector
                 + static::buildGradientProps($attrs)
                 + static::buildCornerRadiusProps($attrs)
                 + static::buildAnimationProps($attrs)
+                + static::buildVariantProps($attrs, fn () => static::makeElement($type))
                 + $capturedProps;
             $onPress = static::resolveOnPress($attrs);
             $onLongPress = static::resolveOnLongPress($attrs);
@@ -590,7 +593,8 @@ class NativeElementCollector
             $props = array_merge($capturedProps, $props ?? []);
             $darkProps = static::buildDarkProps($attrs)
                 + static::buildGradientProps($attrs)
-                + static::buildCornerRadiusProps($attrs);
+                + static::buildCornerRadiusProps($attrs)
+                + static::buildVariantProps($attrs, fn () => static::makeElement($type));
             if (! empty($darkProps)) {
                 $props = array_merge($props ?? [], $darkProps);
             }
@@ -719,6 +723,14 @@ class NativeElementCollector
         }
         if (isset($attrs['aspectRatio'])) {
             $layout['aspect_ratio'] = (float) $attrs['aspectRatio'];
+        }
+        if (isset($attrs['display'])) {
+            $layout['display'] = (int) $attrs['display'];
+        }
+        // The `hidden` attribute (`<native:column hidden>`, `:hidden="$x"`)
+        // wins over any display class, like the HTML attribute it mirrors.
+        if (! empty($attrs['hidden'])) {
+            $layout['display'] = 1;
         }
         if (isset($attrs['alignSelf']) && ($alignSelf = AlignSelf::parse($attrs['alignSelf'])) !== null) {
             $layout['align_self'] = $alignSelf;
@@ -943,6 +955,109 @@ class NativeElementCollector
         }
 
         return $props;
+    }
+
+    /**
+     * Responsive variants — the `md:` / `lg:` class buckets — as ONE
+     * `_variants` prop: a JSON list of `{min, layout?, style?, props?}`
+     * entries sorted by min-width. The native NodeView folds them over the
+     * base node cumulatively (base → sm → md → …) at decode time and picks
+     * the widest entry whose min fits the live window width.
+     *
+     * Each entry is the difference between two complete builds of the node:
+     * everything up to the previous breakpoint, and that plus this
+     * breakpoint's classes. Building a breakpoint's classes on their own
+     * gets composite values wrong, because the builders read sibling keys
+     * the breakpoint doesn't carry — `p-4 md:px-8` would ship
+     * `[0, 32, 0, 32]` and lose the vertical padding, `rounded-xl
+     * md:rounded-t-3xl` would square the bottom corners, and `md:border-2`
+     * would vanish for want of a colour. Building through a real element
+     * also means a prefixed class reaches the wire exactly as the
+     * unprefixed class does, element props included (Text tracking, Image
+     * fit, LazyGrid columns).
+     *
+     * @param  \Closure(): ?Element  $make  a fresh element of the node's type
+     */
+    public static function buildVariantProps(array $attrs, \Closure $make): array
+    {
+        if (empty($attrs['variants']) || ! is_array($attrs['variants'])) {
+            return [];
+        }
+
+        $breakpoints = [];
+        foreach ($attrs['variants'] as $name => $inner) {
+            $min = TailwindParser::breakpointMinWidth((string) $name);
+            if ($min !== null && is_array($inner)) {
+                $breakpoints[] = [$min, $inner];
+            }
+        }
+        usort($breakpoints, fn (array $a, array $b) => $a[0] <=> $b[0]);
+
+        $cumulative = $attrs;
+        unset($cumulative['variants']);
+        $previous = static::variantSnapshot($make, $cumulative);
+        if ($previous === null) {
+            return [];
+        }
+
+        $entries = [];
+        foreach ($breakpoints as [$min, $inner]) {
+            $cumulative = TailwindParser::mergeAttributes($cumulative, $inner);
+            $current = static::variantSnapshot($make, $cumulative);
+
+            $entry = ['min' => $min];
+            foreach (['layout', 'style', 'props'] as $part) {
+                $changed = array_filter(
+                    $current[$part],
+                    fn (mixed $value, string $key): bool => ! array_key_exists($key, $previous[$part])
+                        || $previous[$part][$key] !== $value,
+                    ARRAY_FILTER_USE_BOTH,
+                );
+                if ($changed !== []) {
+                    $entry[$part] = $changed;
+                }
+            }
+            if (count($entry) > 1) {
+                $entries[] = $entry;
+            }
+
+            $previous = $current;
+        }
+
+        return $entries === [] ? [] : ['_variants' => json_encode($entries)];
+    }
+
+    /**
+     * The layout / style / props a node of `$make`'s type serializes to
+     * for `$attrs` — the same appliers the element path runs, on a
+     * throwaway element with a throwaway callback registry, so nothing
+     * leaks into the screen's callback ids.
+     *
+     * @return array{layout: array, style: array, props: array}|null
+     */
+    protected static function variantSnapshot(\Closure $make, array $attrs): ?array
+    {
+        $element = $make();
+        if (! $element instanceof Element) {
+            return null;
+        }
+
+        $element->applyAttributes($attrs);
+        static::applyLayout($element, $attrs);
+        static::applyStyle($element, $attrs);
+        static::applyElementProps($element, $attrs);
+        $element->mergeDarkProps(static::buildDarkProps($attrs));
+        foreach (static::buildGradientProps($attrs) + static::buildCornerRadiusProps($attrs) as $key => $value) {
+            $element->setProp($key, $value);
+        }
+
+        $node = $element->toArray(new CallbackRegistry);
+
+        return [
+            'layout' => $node['layout'] ?? [],
+            'style' => $node['style'] ?? [],
+            'props' => $node['props'] ?? [],
+        ];
     }
 
     /**
@@ -1499,6 +1614,32 @@ class NativeElementCollector
         static::$componentDepth = 0;
     }
 
+    /**
+     * A fresh, unconfigured element for a node type — the builtins plus
+     * anything registered with ElementRegistry — or null when the type is
+     * unknown.
+     */
+    protected static function makeElement(string $type): ?Element
+    {
+        return match ($type) {
+            'column' => Column::make(),
+            'row' => Row::make(),
+            'stack' => Stack::make(),
+            'scroll_view' => ScrollView::make(),
+            'spacer' => Elements\Spacer::make(),
+            'divider' => Elements\Divider::make(),
+            'pressable' => Elements\Pressable::make(),
+            'canvas' => Elements\Canvas::make(),
+            // Inline `<native:bottom-bar>` — bottom-pinned content (chat input,
+            // search bar, …). Hoisted out of the screen tree to the
+            // native-chrome root in NativeComponent::wrapWithNativeChrome and
+            // pinned via `.safeAreaInset(.bottom)` (iOS) / `Scaffold(bottomBar=)`
+            // (Android), which keeps it above the software keyboard natively.
+            'bottom_bar' => Elements\BottomBar::make(),
+            default => ElementRegistry::resolve($type),
+        };
+    }
+
     protected static function createElement(string $type, array $attrs): Element
     {
         $capturedProps = static::$capturedAttributes === []
@@ -1522,24 +1663,8 @@ class NativeElementCollector
             unset($attrs['native-key'], $attrs['native:key']);
         }
 
-        $element = match ($type) {
-            'column' => Column::make(),
-            'row' => Row::make(),
-            'stack' => Stack::make(),
-            'scroll_view' => ScrollView::make(),
-            'spacer' => Elements\Spacer::make(),
-            'divider' => Elements\Divider::make(),
-            'pressable' => Elements\Pressable::make(),
-            'canvas' => Elements\Canvas::make(),
-            // Inline `<native:bottom-bar>` — bottom-pinned content (chat input,
-            // search bar, …). Hoisted out of the screen tree to the
-            // native-chrome root in NativeComponent::wrapWithNativeChrome and
-            // pinned via `.safeAreaInset(.bottom)` (iOS) / `Scaffold(bottomBar=)`
-            // (Android), which keeps it above the software keyboard natively.
-            'bottom_bar' => Elements\BottomBar::make(),
-            default => ElementRegistry::resolve($type)
-                ?? throw new \RuntimeException("Unknown native element type: {$type}"),
-        };
+        $element = static::makeElement($type)
+            ?? throw new \RuntimeException("Unknown native element type: {$type}");
 
         // Registered capture attributes: lift into props, strip from the
         // attrs the native pipeline sees. Empty strings are stripped but
@@ -1600,6 +1725,12 @@ class NativeElementCollector
         foreach (static::buildCornerRadiusProps($attrs) as $key => $value) {
             $element->setProp($key, $value);
         }
+        // Responsive variants (`md:` / `lg:` classes) ride the prop bag as
+        // one JSON string the native NodeView resolves against the live
+        // window width — the packed node has no room for alternatives.
+        foreach (static::buildVariantProps($attrs, fn () => static::makeElement($type)) as $key => $value) {
+            $element->setProp($key, $value);
+        }
 
         // Accessibility props — same central path, so every element honors
         // `a11y-label` / `a11y-hint` even without per-element wiring (the
@@ -1646,6 +1777,12 @@ class NativeElementCollector
         }
         if (isset($attrs['flexDirection'])) {
             $element->flexDirection((int) $attrs['flexDirection']);
+        }
+        if (isset($attrs['display'])) {
+            $element->display((int) $attrs['display']);
+        }
+        if (! empty($attrs['hidden'])) {
+            $element->hidden();
         }
         // Padding (uniform + directional from Tailwind classes)
         $uniformPadding = isset($attrs['padding']) && ! is_array($attrs['padding']) ? (float) $attrs['padding'] : null;
@@ -1762,6 +1899,33 @@ class NativeElementCollector
         if (isset($attrs['elevation'])) {
             $element->elevation((float) $attrs['elevation']);
         }
+        // Colored glow halo (`glow-emerald` etc.). Props bag — same path
+        // as glass / dark_bg_color; no NodeStyle binary-layout change.
+        // Defaults match TailwindParser Slice 1 (radius 16, opacity 0.55)
+        // so an EDGE `glowColor` attr alone still produces a visible halo.
+        if (isset($attrs['glowColor'])) {
+            $element->setProp('glow_color', (string) $attrs['glowColor']);
+            $element->setProp(
+                'glow_radius',
+                isset($attrs['glowRadius']) ? (float) $attrs['glowRadius'] : 16.0
+            );
+            $element->setProp(
+                'glow_opacity',
+                isset($attrs['glowOpacity']) ? (float) $attrs['glowOpacity'] : 0.55
+            );
+        } else {
+            if (isset($attrs['glowRadius'])) {
+                $element->setProp('glow_radius', (float) $attrs['glowRadius']);
+            }
+            if (isset($attrs['glowOpacity'])) {
+                $element->setProp('glow_opacity', (float) $attrs['glowOpacity']);
+            }
+        }
+        // Gaussian blur filter (`blur-*` / `blur-[Npx]`). Props bag — same
+        // path as glow; no NodeStyle binary-layout change. Radius in points.
+        if (isset($attrs['blur'])) {
+            $element->setProp('blur', (float) $attrs['blur']);
+        }
         // Liquid Glass material (1 = regular, 2 = thick). Stored as a
         // generic prop so the renderer can read it via `props.getInt`
         // — no NodeStyle binary-layout change needed.
@@ -1833,11 +1997,33 @@ class NativeElementCollector
         if (isset($attrs['_pinchEnd']) && method_exists($element, 'onPinchEnd')) {
             $element->onPinchEnd($attrs['_pinchEnd']);
         }
+        if (isset($attrs['_dragEnd']) && method_exists($element, 'onDragEnd')) {
+            $element->onDragEnd($attrs['_dragEnd']);
+        }
         if (isset($attrs['_navigated']) && method_exists($element, 'onNavigated')) {
             $element->onNavigated($attrs['_navigated']);
         }
         if (isset($attrs['_navigate'])) {
             $element->setNavigateConfig($attrs['_navigate']);
+        }
+
+        static::applyCustomElementEvents($element, $attrs);
+    }
+
+    protected static function applyCustomElementEvents(Element $element, array $attrs): void
+    {
+        foreach (NativeTagPrecompiler::customElementEvents() as $event) {
+            $attr = '_'.$event;
+
+            if (! isset($attrs[$attr])) {
+                continue;
+            }
+
+            $method = 'on'.str_replace(' ', '', ucwords(str_replace(['-', '_'], ' ', $event)));
+
+            if (method_exists($element, $method)) {
+                $element->{$method}($attrs[$attr]);
+            }
         }
     }
 

@@ -42,7 +42,7 @@ class RuntimeObservedComponent extends NativeComponent
 
     public function dispatchUi(array $event): void
     {
-        $this->dispatch($event);
+        $this->dispatchUiEvent($event);
     }
 
     public function dispatchPluginEvent(string $event, array $payload): void
